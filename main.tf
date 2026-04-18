@@ -1,1 +1,8 @@
-this is my mail file from cmd
+provider "azurerm" {
+  features {}
+}
+
+resource "azurerm_resource_group" "rg" {
+  name     = "demo-rg"
+  location = "East US"
+}
