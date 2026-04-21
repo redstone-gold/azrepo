@@ -2,17 +2,87 @@ trigger:
 - main
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: ubuntu-latest
 
-steps:
-- script: |
-    wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
-    unzip terraform_1.5.0_linux_amd64.zip
-    sudo mv terraform /usr/local/bin/
-  displayName: "Install Terraform"
+variables:
+  terraformVersion: '1.5.0'
+  serviceConnection: 'snStonesRepo'
 
-- script: terraform --version
-  displayName: "Verify Terraform"
+stages:
 
-- script: terraform init
-- script: terraform apply -auto-approve
+# ---------------------------
+# Stage 1: Terraform Init & Plan
+# ---------------------------
+- stage: Terraform_Plan
+  displayName: "Terraform Plan"
+  jobs:
+  - job: Plan
+    steps:
+
+    # Install Terraform
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: $(terraformVersion)
+
+    # Terraform Init
+    - task: AzureCLI@2
+      displayName: "Terraform Init"
+      inputs:
+        azureSubscription: 'snStonesRepo'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          terraform init
+
+    # Terraform Validate
+    - script: terraform validate
+      displayName: "Validate Terraform"
+
+    # Terraform Plan
+    - task: AzureCLI@2
+      displayName: "Terraform Plan"
+      inputs:
+        azureSubscription: 'snStonesRepo'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          terraform plan -out=tfplan
+
+    # Publish Plan Artifact
+    - publish: tfplan
+      artifact: tfplan
+
+# ---------------------------
+# Stage 2: Terraform Apply
+# ---------------------------
+- stage: Terraform_Apply
+  displayName: "Terraform Apply"
+  dependsOn: Terraform_Plan
+  condition: succeeded()
+  jobs:
+  - deployment: Apply
+    environment: 'prod'   # you can add approval here
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          # Install Terraform
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(terraformVersion)
+
+          # Download Plan Artifact
+          - download: current
+            artifact: tfplan
+
+          # Terraform Apply
+          - task: AzureCLI@2
+            displayName: "Terraform Apply"
+            inputs:
+              azureSubscription: 'snStonesRepo'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                terraform init
+                terraform apply -auto-approve
